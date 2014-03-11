@@ -1,0 +1,177 @@
+# chenv is a utility for managing multiple sets of environemnt variables.
+
+[ -z $CHENV_STORE ]     && export CHENV_STORE=$HOME/.chenv
+[ -d $CHENV_STORE ]     || mkdir -p $CHENV_STORE
+
+# Keep a reference to this file so that it can invoke itself in subshells
+[ -z $CHENV_SOURCE ]    && export CHENV_SOURCE=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )/$(basename $BASH_SOURCE)
+
+chenv() {
+  local default_file=$CHENV_STORE/.default
+  local default
+  if [ -f ${default_file} ]; then
+    default=`cat ${default_file}`
+  fi
+
+  if [ ! -z $1 ]; then
+    cmd=$1
+    shift
+  else
+    cmd='help'
+  fi
+  case $cmd in
+    "help" )
+      echo
+      echo "Change Environment"
+      echo
+      echo "Usage:"
+      echo "  chenv help                      Show this message"
+      echo "  chenv create <name>             Create a new environment"
+      echo "  chenv remove <name>             Remove an environment"
+      echo "  chenv use <name>                Use the named environment"
+      echo "  chenv do <name> <command...>    Run a command under the named environment"
+      echo "  chenv default <name>            Set the default environment"
+      echo "  chenv list                      Show all available environments"
+      echo
+      ;;
+    "create" )
+      local account
+      local store
+
+      if [ $# -lt 1 ]; then
+        echo "Usage: chenv create <name>"
+        return 1
+      fi
+
+      account=$1
+      store=${CHENV_STORE}/${account}
+      shift
+
+      if [ -f $store ]; then
+        echo "Environment named ${account} already exists!"
+        return 1
+      fi
+
+      touch $store
+
+      echo "Environment ${account} created! Edit ${store}, switch with chenv use ${account}"
+      ;;
+    "remove" )
+      if [ $# -lt 1 ]; then
+        echo "Usage: chenv remove <name>"
+        return 1
+      fi
+
+      local account=$1
+      local store=${CHENV_STORE}/${account}
+      shift
+
+      if ! [ -f $store ]; then
+        echo "Environment named ${account} does not exist."
+        return 1
+      fi
+
+      rm $store
+      echo "Environment named ${account} removed!"
+      ;;
+    "use" )
+      local account
+      local store
+
+      if [ $# -lt 1 ]; then
+        echo "Usage: chenv use <name>"
+        return 1
+      fi
+
+      account=$1
+      shift
+
+      if [ $account = 'default' ]; then
+        if [ -z $default ]; then
+          echo "No default account has been configured. Set one with chenv default <account>."
+          return 1
+        fi
+        account=$default
+      fi
+
+      store=${CHENV_STORE}/${account}
+      if [ ! -f $store ]; then
+        echo "No environment named ${account}"
+        return 1
+      fi
+
+      export CHENV_CURRENT=$account
+
+      # Unset variables that may be set by the config
+      # TODO: unset all variables set by current config
+
+      source $store
+
+      echo "Switched to environment ${account}"
+      ;;
+    "do" )
+      local account
+
+      if [ $# -lt 1 ]; then
+        echo "Usage: chenv do <name> <command...>"
+        return 1
+      fi
+
+      account=$1
+      store=${CHENV_STORE}/${account}
+      shift
+      command=$*
+
+      if [ ! -f $store ]; then
+        echo "No account named ${account}"
+        return 1
+      fi
+
+      $SHELL -l -c "source ${CHENV_SOURCE}; chenv use ${account}; ${command}"
+      ;;
+    "default" )
+      local account
+
+      if [ $# -lt 1 ]; then
+        echo "Usage: chenv default <name>"
+        return 1
+      fi
+
+      account=$1
+      store=${CHENV_STORE}/${account}
+      shift
+
+      if [ ! -f $store ]; then
+        echo "No account named ${account}"
+        return 1
+      fi
+
+      echo $account > ${default_file}
+      echo "Default environment set to ${account}"
+      ;;
+    "list" )
+      echo
+      echo "Available environments"
+      for account in `ls $CHENV_STORE`; do
+        local ind=''
+        if [ "$account" = "$CHENV_CURRENT" ]; then
+          ind='='
+          [ "$account" = "$default" ] && ind+='*' || ind+='>'
+        else
+          ind=' '
+          [ "$account" = "$default" ] && ind+='*' || ind+=' '
+        fi
+
+        echo "${ind} ${account}"
+      done
+      echo
+      echo '# => - current'
+      echo '# =* - current & default'
+      echo '#  * - default'
+      ;;
+  esac
+}
+
+if [ -z $CHENV_CURRENT ]; then
+  chenv use default > /dev/null || true
+fi
